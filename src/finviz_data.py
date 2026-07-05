@@ -14,9 +14,25 @@ import pandas as pd
 def _clean(text) -> str:
     """Collapse whitespace and drop mojibake replacement chars from Finviz."""
     return " ".join(str(text).replace("�", "").split())
+from finvizfinance import util as _fv_util
 from finvizfinance.news import News as _FinvizNews
 from finvizfinance.quote import finvizfinance as _FinvizQuote
 from finvizfinance.screener.overview import Overview as _Overview
+
+# finvizfinance ships a 2020-era User-Agent and bare headers, which Finviz's
+# bot detection rejects from datacenter IPs (e.g. Streamlit Cloud). Patch in a
+# realistic modern browser fingerprint; the dict is read at request time.
+_fv_util.headers.update({
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                   "Chrome/126.0.0.0 Safari/537.36"),
+    "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,"
+               "image/avif,image/webp,*/*;q=0.8"),
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://finviz.com/",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+})
 
 # Curated subset of Finviz screener signals, most useful first
 SIGNALS = [
@@ -52,7 +68,7 @@ def run_screen(signal: str, cap_label: str = "Any", sector: str = "Any",
             filters["Market Cap."] = CAP_FILTERS[cap_label]
         if sector and sector != "Any":
             filters["Sector"] = sector
-        screen.set_filter(signal=signal, filters_dict=filters or None)
+        screen.set_filter(signal=signal, filters_dict=filters)
         df = screen.screener_view(limit=limit, verbose=0)
         if df is None or df.empty:
             return pd.DataFrame()
