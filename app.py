@@ -171,12 +171,18 @@ def load_results(tickers: tuple[str, ...]):
 
 @st.cache_data(ttl=900, show_spinner=False)
 def load_screen(signal: str, cap_label: str, sector: str):
-    return finviz_data.run_screen(signal, cap_label, sector)
+    df = finviz_data.run_screen(signal, cap_label, sector)
+    if df is None:
+        raise ConnectionError("Finviz unreachable")  # raise so failures aren't cached
+    return df
 
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_market_news():
-    return finviz_data.market_news()
+    feed = finviz_data.market_news()
+    if feed is None:
+        raise ConnectionError("Finviz unreachable")
+    return feed
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -360,8 +366,11 @@ with tab_scanner:
     scan_cap = f2.selectbox("Market cap", list(finviz_data.CAP_FILTERS))
     scan_sector = f3.selectbox("Sector", finviz_data.SECTOR_FILTERS)
 
-    with st.spinner("Scanning..."):
-        scan_df = load_screen(scan_signal, scan_cap, scan_sector)
+    try:
+        with st.spinner("Scanning..."):
+            scan_df = load_screen(scan_signal, scan_cap, scan_sector)
+    except Exception:
+        scan_df = None
 
     if scan_df is None:
         st.warning("Finviz is unreachable right now (rate limit or site issue). "
@@ -400,8 +409,11 @@ with tab_news:
     head_l.subheader("Market-wide news — Finviz feed")
     trusted_only = head_r.toggle("Trusted publishers only", value=True)
 
-    with st.spinner("Fetching news feed..."):
-        feed = load_market_news()
+    try:
+        with st.spinner("Fetching news feed..."):
+            feed = load_market_news()
+    except Exception:
+        feed = None
 
     if feed is None:
         st.warning("Finviz news feed is unreachable right now. Try again in a minute.")
