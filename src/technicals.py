@@ -56,6 +56,23 @@ def analyze(df: pd.DataFrame) -> dict | None:
 
     r5, r21, r63 = ret(5), ret(21), ret(63)
 
+    # --- ascending-volume signal in [-1, 1] ---
+    # Expanding volume *with* the price trend = accumulation (confirms the move);
+    # expanding volume against it, or a rally on drying-up volume = distribution
+    # or fading conviction. Blended with 21-day up-day vs down-day volume balance.
+    vol_score = None
+    if vol_ratio is not None and r21 is not None:
+        v = df["Volume"].dropna().tail(21)
+        chg = close.pct_change().reindex(v.index)
+        up_vol = float(v[chg > 0].sum())
+        down_vol = float(v[chg < 0].sum())
+        total = up_vol + down_vol
+        updown = (up_vol - down_vol) / total if total > 0 else 0.0
+        expansion = float(np.clip((vol_ratio - 1) / 0.4, -1, 1))
+        trend_dir = 1.0 if r21 > 0 else -1.0
+        confirm = trend_dir * expansion
+        vol_score = float(np.clip(0.5 * confirm + 0.5 * updown, -1, 1))
+
     # --- scoring: each component in [-1, 1], then weighted ---
     parts: list[tuple[float, float]] = []  # (score, weight)
     if r21 is not None:
@@ -89,5 +106,5 @@ def analyze(df: pd.DataFrame) -> dict | None:
         "last": last, "ret_1w": r5, "ret_1m": r21, "ret_3m": r63,
         "sma20": sma20, "sma50": sma50, "sma200": sma200,
         "rsi": rsi, "macd_hist": macd_hist, "volatility": vol_30d,
-        "pos_52w": pos_52w, "vol_ratio": vol_ratio,
+        "pos_52w": pos_52w, "vol_ratio": vol_ratio, "vol_score": vol_score,
     }

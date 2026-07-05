@@ -5,13 +5,14 @@ produce directional leans ("might / could / would") for the coming 1–3 weeks.
 
 ## How it works
 
-Three signals are computed per stock and blended into a composite score:
+Four signals are computed per stock and blended into a composite score:
 
 | Signal | Weight | What it measures |
 |---|---|---|
-| Price action | 45% | 1M/3M momentum, trend vs SMA 50/200, MACD, RSI (over/oversold) |
-| Credible news | 35% | VADER sentiment on headlines from **trusted publishers only** (Reuters, Bloomberg, AP, CNBC, WSJ, Barron's, MarketWatch, FT…), recency-weighted with a 5-day half-life. Blog spam and stock-promo sites are discarded. Press-release wires count at half weight. |
-| Sector rotation | 20% | The stock's sector ETF (XLK, XLF, …) 1-month return relative to SPY |
+| Price action | 35% | 1M/3M momentum, trend vs SMA 50/200, MACD, RSI (over/oversold) |
+| Credible news | 30% | VADER sentiment on headlines from **trusted publishers only** (Reuters, Bloomberg, AP, CNBC, WSJ, Barron's, MarketWatch, FT…), recency-weighted with a 5-day half-life. Blog spam and stock-promo sites are discarded. Press-release wires count at half weight. The ~20 strongest-signal stocks get their news deepened with Finviz headlines before final scoring. |
+| Ascending volume | 20% | Whether volume is expanding *behind* the price trend (accumulation confirms the move) or against it / drying up (distribution, fading conviction) — 10-day vs 3-month volume plus 21-day up-day/down-day volume balance |
+| Sector rotation | 15% | The stock's sector ETF (XLK, XLF, …) 1-month return relative to SPY |
 
 If a stock has no qualifying news, the news weight shifts to price action rather
 than counting silence as neutral sentiment.

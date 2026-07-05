@@ -1,10 +1,10 @@
 """Composite outlook engine.
 
-Blends price action, credible-news sentiment, and sector rotation into a
-directional outlook for the coming 1-3 weeks, expressed in three conviction
-tiers:
+Blends four signals — price action, credible-news sentiment, ascending-volume
+confirmation, and sector rotation — into a directional outlook for the coming
+1-3 weeks, expressed in three conviction tiers:
 
-  WOULD  - all signals aligned, decent news coverage: highest conviction
+  WOULD  - every available signal aligned, decent news coverage: highest conviction
   COULD  - majority of signals agree: moderate conviction
   MIGHT  - weak or conflicting evidence: speculative watch-list only
 
@@ -12,20 +12,24 @@ This is statistical inference on public data, not financial advice.
 """
 from __future__ import annotations
 
-WEIGHTS = {"technical": 0.45, "news": 0.35, "sector": 0.20}
+WEIGHTS = {"technical": 0.35, "news": 0.30, "volume": 0.20, "sector": 0.15}
 
 
 def predict(tech: dict, news: dict, sector_score: float) -> dict:
     t = tech["score"]
     n = news["score"]
+    v = tech.get("vol_score")
     s = sector_score
 
-    # If there is no qualifying news, redistribute its weight to price action.
-    if news["count"] == 0:
-        composite = (t * (WEIGHTS["technical"] + WEIGHTS["news"])
-                     + s * WEIGHTS["sector"])
-    else:
-        composite = t * WEIGHTS["technical"] + n * WEIGHTS["news"] + s * WEIGHTS["sector"]
+    # Only weight signals we actually have; missing ones (no qualifying news,
+    # no volume data) redistribute their weight across the rest.
+    comps = {"technical": t, "sector": s}
+    if news["count"]:
+        comps["news"] = n
+    if v is not None:
+        comps["volume"] = v
+    weight_sum = sum(WEIGHTS[k] for k in comps)
+    composite = sum(comps[k] * WEIGHTS[k] for k in comps) / weight_sum
 
     if composite > 0.12:
         direction = "Bullish"
@@ -34,10 +38,10 @@ def predict(tech: dict, news: dict, sector_score: float) -> dict:
     else:
         direction = "Neutral"
 
-    signs = [x for x in (t, n if news["count"] else None, s) if x is not None]
-    aligned = sum(1 for x in signs if (x > 0) == (composite > 0) and abs(x) > 0.05)
+    values = list(comps.values())
+    aligned = sum(1 for x in values if (x > 0) == (composite > 0) and abs(x) > 0.05)
 
-    if abs(composite) >= 0.40 and aligned >= len(signs) and news["count"] >= 3:
+    if abs(composite) >= 0.40 and aligned == len(values) and news["count"] >= 3:
         tier = "WOULD"
     elif abs(composite) >= 0.20 and aligned >= 2:
         tier = "COULD"
@@ -53,6 +57,17 @@ def predict(tech: dict, news: dict, sector_score: float) -> dict:
         reasons.append(f"{news['count']} credible headlines skew {mood} ({n:+.2f})")
     else:
         reasons.append("no recent coverage from trusted publishers")
+
+    if v is not None and abs(v) > 0.2:
+        vr = tech.get("vol_ratio")
+        vr_txt = f" (recent volume {vr:.1f}× the 3-month average)" if vr else ""
+        if v > 0:
+            reasons.append(f"ascending volume is confirming the move{vr_txt} "
+                           "— accumulation")
+        else:
+            reasons.append(f"volume pattern warns of distribution or fading "
+                           f"conviction{vr_txt}")
+
     if abs(s) > 0.15:
         reasons.append(f"its sector is {'leading' if s > 0 else 'lagging'} the S&P 500")
 

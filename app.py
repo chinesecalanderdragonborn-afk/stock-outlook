@@ -225,7 +225,8 @@ def signal_bars(pairs: list[tuple[str, float]]) -> str:
 st.sidebar.markdown("## 📈 Weekly Stock Outlook")
 st.sidebar.caption(
     "Signals from **price action**, **credible news** (Reuters, Bloomberg, AP, "
-    "CNBC, WSJ, Barron's, MarketWatch…), and **sector rotation**."
+    "CNBC, WSJ, Barron's, MarketWatch…), **ascending volume**, and "
+    "**sector rotation**."
 )
 
 extra = st.sidebar.text_input("Add tickers (comma-separated)", "",
@@ -273,7 +274,7 @@ avg_tone = (sum(r["news"]["score"] for r in covered) / len(covered)) if covered 
 st.markdown(
     "<div class='hero'><h1>Weekly <span class='grad'>Stock Outlook</span></h1>"
     "<p>Directional leans for the coming 1–3 weeks · price action + credible news "
-    f"+ sector rotation · showing {len(filtered)} of {len(results)} stocks</p></div>",
+    f"+ volume + sector rotation · showing {len(filtered)} of {len(results)} stocks</p></div>",
     unsafe_allow_html=True)
 st.write("")
 
@@ -341,6 +342,8 @@ with tab_outlook:
         "1W %": None if r["tech"]["ret_1w"] is None else round(r["tech"]["ret_1w"] * 100, 1),
         "1M %": None if r["tech"]["ret_1m"] is None else round(r["tech"]["ret_1m"] * 100, 1),
         "RSI": None if r["tech"]["rsi"] is None else round(r["tech"]["rsi"]),
+        "Vol trend": None if r["tech"]["vol_ratio"] is None
+                     else round(r["tech"]["vol_ratio"], 2),
         "News #": r["news"]["count"],
         "Tone": round(r["news"]["score"], 2),
         "Mkt cap": fmt_cap(r["profile"]["market_cap"]),
@@ -352,6 +355,8 @@ with tab_outlook:
                 "Score", min_value=-1.0, max_value=1.0, format="%+.2f"),
             "1W %": st.column_config.NumberColumn(format="%+.1f%%"),
             "1M %": st.column_config.NumberColumn(format="%+.1f%%"),
+            "Vol trend": st.column_config.NumberColumn(
+                format="%.2f×", help="10-day avg volume vs 3-month avg"),
             "Tone": st.column_config.NumberColumn(format="%+.2f"),
         })
 
@@ -503,9 +508,12 @@ with tab_detail:
             st.markdown(signal_bars([
                 ("Price action", tech["score"]),
                 ("News tone", r["news"]["score"]),
+                ("Volume", tech.get("vol_score") or 0.0),
                 ("Sector", r["sector_info"].get("score", 0.0)),
                 ("Composite", p["composite"]),
             ]), unsafe_allow_html=True)
+            if r.get("news_enriched"):
+                st.caption("news scoring deepened with Finviz headlines")
         with col_why:
             st.markdown("##### Why")
             st.markdown("\n".join(f"- {reason}" for reason in p["reasons"]))
@@ -521,8 +529,8 @@ with tab_detail:
         with st.spinner("Merging Yahoo + Finviz coverage..."):
             fin_news = load_stock_news(r["ticker"])
         merged = news_mod.dedupe(
-            [{**i, "origin": "Yahoo"} for i in r["news"]["items"]]
-            + [{**i, "origin": "Finviz"} for i in fin_news["items"]])
+            [{"origin": "Yahoo", **i} for i in r["news"]["items"]]
+            + [{"origin": "Finviz", **i} for i in fin_news["items"]])
         merged.sort(key=lambda x: x["age_days"])
 
         if merged:
