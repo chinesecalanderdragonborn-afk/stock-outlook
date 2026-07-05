@@ -16,6 +16,17 @@ Three signals are computed per stock and blended into a composite score:
 If a stock has no qualifying news, the news weight shifts to price action rather
 than counting silence as neutral sentiment.
 
+### Finviz integration
+
+- **📡 Scanner tab** — live Finviz signal screens (Top Gainers, Unusual Volume,
+  Oversold, New Highs, Insider Buying…) across the whole market, filterable by
+  cap tier and sector.
+- **📰 Market News tab** — Finviz's aggregated market-wide feed, filtered to
+  trusted publishers by default, each headline sentiment-scored.
+- **Stock Detail news** — per-stock Finviz headlines merged (and deduplicated)
+  with the Yahoo feed, so coverage runs much deeper. The composite *score*
+  still uses the Yahoo feed only, keeping the batch analysis fast.
+
 ### Conviction tiers
 
 - 🟢 **WOULD** — composite ≥ |0.40|, *all* signals aligned, ≥3 credible headlines

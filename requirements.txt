@@ -4,3 +4,4 @@ plotly>=5.24
 pandas>=2.2
 numpy>=1.26
 vaderSentiment>=3.3
+finvizfinance>=1.1

@@ -19,9 +19,40 @@ TRUSTED_PUBLISHERS = {
     "investopedia", "fortune", "forbes", "the economist", "axios",
     "business insider",
 }
+# Finviz's market feed reports sources as domains rather than display names
+TRUSTED_DOMAINS = {
+    "reuters.com", "bloomberg.com", "apnews.com", "cnbc.com", "wsj.com",
+    "barrons.com", "marketwatch.com", "ft.com", "finance.yahoo.com",
+    "investors.com", "investopedia.com", "fortune.com", "forbes.com",
+    "economist.com", "axios.com", "businessinsider.com", "foxbusiness.com",
+}
 PRESS_WIRES = {"business wire", "pr newswire", "globenewswire", "accesswire"}
 
 _vader = SentimentIntensityAnalyzer()
+
+
+def is_trusted(publisher: str) -> bool:
+    """Accept both display names ('Bloomberg') and domains ('www.bloomberg.com')."""
+    pub = (publisher or "").strip().lower()
+    if pub in TRUSTED_PUBLISHERS:
+        return True
+    host = pub.split("/")[0].removeprefix("www.")
+    return any(host == d or host.endswith("." + d) for d in TRUSTED_DOMAINS)
+
+
+def sentiment_of(text: str) -> float:
+    return _vader.polarity_scores(text)["compound"]
+
+
+def dedupe(items: list[dict]) -> list[dict]:
+    """Drop items whose normalized title was already seen (multi-feed merges)."""
+    seen, out = set(), []
+    for item in items:
+        key = "".join(ch for ch in item.get("title", "").lower() if ch.isalnum())
+        if key and key not in seen:
+            seen.add(key)
+            out.append(item)
+    return out
 
 
 def _parse_ts(value) -> datetime | None:
@@ -43,11 +74,11 @@ def analyze(raw_items: list[dict], max_age_days: int = 14) -> dict:
     now = datetime.now(timezone.utc)
     kept, weighted_sum, weight_total = [], 0.0, 0.0
 
-    for item in raw_items:
+    for item in dedupe(raw_items):
         pub = (item.get("publisher") or "").strip().lower()
-        is_trusted = pub in TRUSTED_PUBLISHERS
+        trusted = is_trusted(pub)
         is_wire = pub in PRESS_WIRES
-        if not (is_trusted or is_wire):
+        if not (trusted or is_wire):
             continue
 
         ts = _parse_ts(item.get("published"))

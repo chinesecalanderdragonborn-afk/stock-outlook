@@ -7,7 +7,8 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from src import charts, pipeline, sectors
+from src import charts, finviz_data, pipeline, sectors
+from src import news as news_mod
 from src.charts import CHART_CONFIG
 from src.classify import CAP_ORDER
 from src.universe import CORE_UNIVERSE
@@ -168,6 +169,21 @@ def load_results(tickers: tuple[str, ...]):
     return pipeline.analyze_universe(list(tickers), load_sector_scores())
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def load_screen(signal: str, cap_label: str, sector: str):
+    return finviz_data.run_screen(signal, cap_label, sector)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_market_news():
+    return finviz_data.market_news()
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def load_stock_news(ticker: str):
+    return news_mod.analyze(finviz_data.stock_news(ticker))
+
+
 def fmt_cap(v):
     if not v:
         return "—"
@@ -266,8 +282,9 @@ kpi(k3, "Conviction", f"{len(high_conv)}", "stocks with all signals aligned")
 kpi(k4, "News tone", f"{avg_tone:+.2f}", f"{len(covered)} stocks with trusted coverage")
 st.write("")
 
-tab_outlook, tab_sectors, tab_buckets, tab_detail = st.tabs(
-    ["🎯 Outlook", "🏭 Sectors", "🗂️ Cap & Style", "🔍 Stock Detail"])
+tab_outlook, tab_scanner, tab_sectors, tab_news, tab_buckets, tab_detail = st.tabs(
+    ["🎯 Outlook", "📡 Scanner", "🏭 Sectors", "📰 Market News",
+     "🗂️ Cap & Style", "🔍 Stock Detail"])
 
 # ---------------------------------------------------------------- outlook tab
 with tab_outlook:
@@ -332,6 +349,40 @@ with tab_outlook:
             "Tone": st.column_config.NumberColumn(format="%+.2f"),
         })
 
+# ---------------------------------------------------------------- scanner tab
+with tab_scanner:
+    st.subheader("Finviz market scanner")
+    st.caption("Live signal screens across the **entire market** — not just the "
+               "analyzed universe. Spot something interesting? Add its ticker in "
+               "the sidebar to run the full outlook analysis on it.")
+    f1, f2, f3 = st.columns(3)
+    scan_signal = f1.selectbox("Signal", finviz_data.SIGNALS)
+    scan_cap = f2.selectbox("Market cap", list(finviz_data.CAP_FILTERS))
+    scan_sector = f3.selectbox("Sector", finviz_data.SECTOR_FILTERS)
+
+    with st.spinner("Scanning..."):
+        scan_df = load_screen(scan_signal, scan_cap, scan_sector)
+
+    if scan_df is None:
+        st.warning("Finviz is unreachable right now (rate limit or site issue). "
+                   "Try again in a minute.")
+    elif scan_df.empty:
+        st.info("No stocks match this scan right now.")
+    else:
+        view = scan_df.copy()
+        view["Market Cap"] = view["Market Cap"].map(fmt_cap)
+        if "Change" in view:
+            view["Change"] = view["Change"] * 100
+        st.dataframe(
+            view, width="stretch", hide_index=True, height=560,
+            column_config={
+                "Change": st.column_config.NumberColumn(format="%+.2f%%"),
+                "Price": st.column_config.NumberColumn(format="$%.2f"),
+                "Volume": st.column_config.NumberColumn(format="localized"),
+                "P/E": st.column_config.NumberColumn(format="%.1f"),
+            })
+        st.caption(f"{len(view)} results · signal: {scan_signal} · data: finviz.com")
+
 # ---------------------------------------------------------------- sectors tab
 with tab_sectors:
     st.subheader("Sector rotation — 1-month performance vs S&P 500")
@@ -342,6 +393,38 @@ with tab_sectors:
                     config={"displayModeBar": False})
     st.caption("Stocks in leading sectors get a tailwind in the composite score; "
                "lagging sectors a headwind.")
+
+# ---------------------------------------------------------------- market news tab
+with tab_news:
+    head_l, head_r = st.columns([3, 1])
+    head_l.subheader("Market-wide news — Finviz feed")
+    trusted_only = head_r.toggle("Trusted publishers only", value=True)
+
+    with st.spinner("Fetching news feed..."):
+        feed = load_market_news()
+
+    if feed is None:
+        st.warning("Finviz news feed is unreachable right now. Try again in a minute.")
+    else:
+        shown = [i for i in feed
+                 if not trusted_only or news_mod.is_trusted(i["publisher"])]
+        if not shown:
+            st.info("No headlines from trusted publishers in the current feed — "
+                    "flip the toggle to see all sources.")
+        for item in shown[:40]:
+            s = news_mod.sentiment_of(item["title"])
+            tone = ("var(--green)" if s > 0.15 else
+                    "var(--red)" if s < -0.15 else "var(--muted)")
+            badge = "" if news_mod.is_trusted(item["publisher"]) else \
+                "<span class='pill pill-info' style='margin-left:8px'>unvetted</span>"
+            link = (f"<a href='{item['url']}' target='_blank'>{item['title']}</a>"
+                    if item["url"] else item["title"])
+            st.markdown(
+                f"<div class='news-card' style='--tone:{tone}'>{link}{badge}"
+                f"<div class='meta'>{item['publisher']} · {item['when']} · "
+                f"tone <span style='color:{tone}'>{s:+.2f}</span></div></div>",
+                unsafe_allow_html=True)
+        st.caption(f"{min(len(shown), 40)} of {len(feed)} headlines · data: finviz.com")
 
 # ---------------------------------------------------------------- buckets tab
 with tab_buckets:
@@ -423,8 +506,15 @@ with tab_detail:
                        "double-click to reset")
 
         st.markdown("### Recent credible news")
-        if r["news"]["items"]:
-            for item in r["news"]["items"]:
+        with st.spinner("Merging Yahoo + Finviz coverage..."):
+            fin_news = load_stock_news(r["ticker"])
+        merged = news_mod.dedupe(
+            [{**i, "origin": "Yahoo"} for i in r["news"]["items"]]
+            + [{**i, "origin": "Finviz"} for i in fin_news["items"]])
+        merged.sort(key=lambda x: x["age_days"])
+
+        if merged:
+            for item in merged:
                 tone = ("var(--green)" if item["sentiment"] > 0.15
                         else "var(--red)" if item["sentiment"] < -0.15
                         else "var(--muted)")
@@ -437,7 +527,7 @@ with tab_detail:
                     f"<div class='news-card' style='--tone:{tone}'>{link}"
                     f"<div class='meta'>{src} · {item['age_days']:.0f}d ago · "
                     f"tone <span style='color:{tone}'>{item['sentiment']:+.2f}</span>"
-                    f"</div></div>",
+                    f" · via {item['origin']}</div></div>",
                     unsafe_allow_html=True)
         else:
             st.info("No recent coverage from trusted publishers — outlook relies on "
