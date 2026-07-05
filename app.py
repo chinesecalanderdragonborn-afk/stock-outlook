@@ -1,8 +1,10 @@
-"""Weekly Stock Outlook — news, price action, and sector analysis dashboard.
+"""Weekly Stock Outlook — news, price action, volume, and sector analysis.
 
 Run with:  streamlit run app.py
 """
 from __future__ import annotations
+
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
@@ -15,35 +17,101 @@ from src.universe import CORE_UNIVERSE
 
 st.set_page_config(page_title="Weekly Stock Outlook", page_icon="📈", layout="wide")
 
-# ---------------------------------------------------------------- design system
-st.markdown("""
-<style>
+# ---------------------------------------------------------------- theme system
+DARK_UI = {
+    "bg": "#0A0E17", "glow1": "rgba(0,255,135,0.07)", "glow2": "rgba(34,211,238,0.06)",
+    "panel": "rgba(15,22,38,0.85)", "side": "rgba(13,18,32,0.92)",
+    "text": "#E6EDF3", "muted": "#8B95A9", "line": "rgba(230,237,243,0.08)",
+    "green": "#00FF87", "red": "#FF2E55", "cyan": "#22D3EE", "amber": "#FFC24B",
+    "green_soft": "rgba(0,255,135,0.12)", "green_border": "rgba(0,255,135,0.4)",
+    "red_soft": "rgba(255,46,85,0.10)", "red_border": "rgba(255,46,85,0.35)",
+    "amber_soft": "rgba(255,194,75,0.12)", "amber_border": "rgba(255,194,75,0.4)",
+    "cyan_soft": "rgba(34,211,238,0.10)", "cyan_border": "rgba(34,211,238,0.3)",
+    "chip": "rgba(255,255,255,0.05)", "chip_border": "rgba(230,237,243,0.12)",
+    "chipbar": "rgba(255,255,255,0.035)", "track": "rgba(255,255,255,0.06)",
+    "midline": "rgba(230,237,243,0.25)", "neutral_text": "#B9C2D4",
+    "shadow": "none",
+    "tab_sel": "linear-gradient(135deg, rgba(0,255,135,0.16), rgba(34,211,238,0.10))",
+}
+
+LIGHT_UI = {
+    "bg": "#F4F7FB", "glow1": "rgba(0,158,96,0.08)", "glow2": "rgba(14,116,144,0.07)",
+    "panel": "#FFFFFF", "side": "#FDFEFF",
+    "text": "#0E1726", "muted": "#5B6B84", "line": "rgba(14,23,38,0.10)",
+    "green": "#009E60", "red": "#E11D48", "cyan": "#0E7490", "amber": "#B45309",
+    "green_soft": "rgba(0,158,96,0.10)", "green_border": "rgba(0,158,96,0.45)",
+    "red_soft": "rgba(225,29,72,0.08)", "red_border": "rgba(225,29,72,0.4)",
+    "amber_soft": "rgba(180,83,9,0.10)", "amber_border": "rgba(180,83,9,0.4)",
+    "cyan_soft": "rgba(14,116,144,0.08)", "cyan_border": "rgba(14,116,144,0.35)",
+    "chip": "rgba(14,23,38,0.045)", "chip_border": "rgba(14,23,38,0.12)",
+    "chipbar": "rgba(14,23,38,0.04)", "track": "rgba(14,23,38,0.07)",
+    "midline": "rgba(14,23,38,0.3)", "neutral_text": "#42526B",
+    "shadow": "0 1px 2px rgba(16,24,40,0.06), 0 2px 8px rgba(16,24,40,0.08)",
+    "tab_sel": "linear-gradient(135deg, rgba(0,158,96,0.14), rgba(14,116,144,0.10))",
+}
+
+
+def apply_native_theme(light: bool) -> None:
+    """Retint Streamlit's built-in widgets (dataframes, dropdowns, toggles)."""
+    try:
+        from streamlit import config as _cfg
+        vals = ({"theme.base": "light", "theme.primaryColor": "#009E60",
+                 "theme.backgroundColor": "#F4F7FB",
+                 "theme.secondaryBackgroundColor": "#FFFFFF",
+                 "theme.textColor": "#0E1726"} if light else
+                {"theme.base": "dark", "theme.primaryColor": "#00FF87",
+                 "theme.backgroundColor": "#0A0E17",
+                 "theme.secondaryBackgroundColor": "#111827",
+                 "theme.textColor": "#E6EDF3"})
+        for key, val in vals.items():
+            _cfg.set_option(key, val)
+    except Exception:
+        pass  # native widgets keep the default theme; custom CSS still applies
+
+
+IS_LIGHT = bool(st.session_state.get("light_mode", False))
+apply_native_theme(IS_LIGHT)
+UI = LIGHT_UI if IS_LIGHT else DARK_UI
+CHART_PAL = charts.LIGHT_CHART if IS_LIGHT else charts.DARK_CHART
+
+_root = ":root {" + "".join(
+    f"--{k.replace('_', '-')}: {v};" for k, v in UI.items()) + "}"
+
+st.markdown("<style>" + _root + """
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap');
 
-:root {
-    --green: #00FF87;  --red: #FF2E55;  --cyan: #22D3EE;  --amber: #FFC24B;
-    --ink: #0F1626;    --line: rgba(230,237,243,0.08);    --muted: #8B95A9;
-}
 html, body, .stApp, [class*="css"] { font-family: 'Inter', sans-serif; }
 .stApp {
     background:
-        radial-gradient(1100px 700px at 85% -10%, rgba(0,255,135,0.07), transparent 60%),
-        radial-gradient(900px 600px at -10% 15%, rgba(34,211,238,0.06), transparent 60%),
-        #0A0E17;
+        radial-gradient(1100px 700px at 85% -10%, var(--glow1), transparent 60%),
+        radial-gradient(900px 600px at -10% 15%, var(--glow2), transparent 60%),
+        var(--bg);
+    color: var(--text);
 }
 #MainMenu, footer { visibility: hidden; }
 header[data-testid="stHeader"] { background: transparent; }
 .block-container { padding-top: 1.6rem; max-width: 1350px; }
 
+.stApp, .kpi, .news-card, .bucket, div[data-testid="stExpander"],
 section[data-testid="stSidebar"] {
-    background: rgba(13,18,32,0.92);
+    transition: background 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+}
+
+section[data-testid="stSidebar"] {
+    background: var(--side);
     border-right: 1px solid var(--line);
 }
 section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
+/* hardening: keep sidebar text readable even if the native theme lags */
+section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2,
+section[data-testid="stSidebar"] h3, section[data-testid="stSidebar"] h4,
+section[data-testid="stSidebar"] p, section[data-testid="stSidebar"] label {
+    color: var(--text);
+}
 
 /* tabs → segmented pill bar */
 .stTabs [data-baseweb="tab-list"] {
-    gap: 6px; background: rgba(255,255,255,0.035);
+    gap: 6px; background: var(--chipbar);
     padding: 6px; border-radius: 14px; border: 1px solid var(--line);
 }
 .stTabs [data-baseweb="tab"] {
@@ -51,24 +119,25 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
     color: var(--muted); font-weight: 600; font-size: 0.92rem;
 }
 .stTabs [aria-selected="true"] {
-    background: linear-gradient(135deg, rgba(0,255,135,0.16), rgba(34,211,238,0.10));
+    background: var(--tab-sel);
     color: var(--green) !important;
-    box-shadow: inset 0 0 0 1px rgba(0,255,135,0.35);
+    box-shadow: inset 0 0 0 1px var(--green-border);
 }
 .stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] { display: none; }
 
 /* expanders → cards */
 div[data-testid="stExpander"] {
-    background: rgba(15,22,38,0.75); border: 1px solid var(--line);
+    background: var(--panel); border: 1px solid var(--line);
     border-radius: 14px; overflow: hidden; margin-bottom: 4px;
+    box-shadow: var(--shadow);
 }
 div[data-testid="stExpander"] summary { font-weight: 600; }
-div[data-testid="stExpander"]:hover { border-color: rgba(0,255,135,0.30); }
+div[data-testid="stExpander"]:hover { border-color: var(--green-border); }
 
 /* hero */
 .hero h1 {
     font-size: 2.5rem; font-weight: 900; letter-spacing: -0.03em;
-    margin: 0 0 2px 0; line-height: 1.1;
+    margin: 0 0 2px 0; line-height: 1.1; color: var(--text);
 }
 .hero .grad {
     background: linear-gradient(90deg, var(--green), var(--cyan));
@@ -82,18 +151,19 @@ div[data-testid="stExpander"]:hover { border-color: rgba(0,255,135,0.30); }
     font-size: 0.74rem; font-weight: 800; letter-spacing: 0.06em;
     text-transform: uppercase; margin-right: 6px; margin-bottom: 4px;
 }
-.pill-would { background: rgba(0,255,135,0.12); color: var(--green); border: 1px solid rgba(0,255,135,0.4); }
-.pill-could { background: rgba(255,194,75,0.12); color: var(--amber); border: 1px solid rgba(255,194,75,0.4); }
-.pill-might { background: rgba(139,149,169,0.12); color: #B9C2D4; border: 1px solid rgba(139,149,169,0.4); }
-.pill-bull  { background: rgba(0,255,135,0.10); color: var(--green); border: 1px solid rgba(0,255,135,0.3); }
-.pill-bear  { background: rgba(255,46,85,0.10); color: var(--red); border: 1px solid rgba(255,46,85,0.35); }
-.pill-flat  { background: rgba(34,211,238,0.10); color: var(--cyan); border: 1px solid rgba(34,211,238,0.3); }
-.pill-info  { background: rgba(255,255,255,0.05); color: #C9D3E4; border: 1px solid var(--line); }
+.pill-would { background: var(--green-soft); color: var(--green); border: 1px solid var(--green-border); }
+.pill-could { background: var(--amber-soft); color: var(--amber); border: 1px solid var(--amber-border); }
+.pill-might { background: var(--chip); color: var(--neutral-text); border: 1px solid var(--chip-border); }
+.pill-bull  { background: var(--green-soft); color: var(--green); border: 1px solid var(--green-border); }
+.pill-bear  { background: var(--red-soft); color: var(--red); border: 1px solid var(--red-border); }
+.pill-flat  { background: var(--cyan-soft); color: var(--cyan); border: 1px solid var(--cyan-border); }
+.pill-info  { background: var(--chip); color: var(--neutral-text); border: 1px solid var(--chip-border); }
 
 /* KPI cards */
 .kpi {
-    background: rgba(15,22,38,0.85); border: 1px solid var(--line);
+    background: var(--panel); border: 1px solid var(--line);
     border-radius: 16px; padding: 14px 16px; height: 100%; min-width: 0;
+    box-shadow: var(--shadow);
 }
 .kpi * { word-break: keep-all; overflow-wrap: normal; }
 .kpi .lab { color: var(--muted); font-size: 0.68rem; font-weight: 700;
@@ -101,51 +171,52 @@ div[data-testid="stExpander"]:hover { border-color: rgba(0,255,135,0.30); }
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kpi .val { font-size: clamp(1.05rem, 1.5vw, 1.65rem); font-weight: 800;
             font-family: 'JetBrains Mono', monospace; white-space: nowrap;
-            margin-top: 2px; line-height: 1.25; }
+            margin-top: 2px; line-height: 1.25; color: var(--text); }
 .kpi .sub { color: var(--muted); font-size: 0.76rem; margin-top: 2px; }
-.kpi.glow-green { border-color: rgba(0,255,135,0.35); box-shadow: 0 0 24px rgba(0,255,135,0.07) inset; }
-.kpi.glow-red   { border-color: rgba(255,46,85,0.35);  box-shadow: 0 0 24px rgba(255,46,85,0.07) inset; }
+.kpi.glow-green { border-color: var(--green-border); box-shadow: inset 0 0 24px var(--green-soft); }
+.kpi.glow-red   { border-color: var(--red-border);  box-shadow: inset 0 0 24px var(--red-soft); }
 
 /* diverging signal bars */
 .sig-row { display: flex; align-items: center; gap: 12px; margin: 7px 0; }
 .sig-lab { width: 105px; color: var(--muted); font-size: 0.8rem; font-weight: 600; }
 .sig-track { position: relative; flex: 1; height: 10px;
-             background: rgba(255,255,255,0.06); border-radius: 6px; }
+             background: var(--track); border-radius: 6px; }
 .sig-track::after { content: ""; position: absolute; left: 50%; top: -3px; bottom: -3px;
-                    width: 1px; background: rgba(230,237,243,0.25); }
+                    width: 1px; background: var(--midline); }
 .sig-fill { position: absolute; top: 0; bottom: 0; border-radius: 6px; }
 .sig-val { width: 52px; text-align: right; font-family: 'JetBrains Mono', monospace;
            font-size: 0.82rem; font-weight: 700; }
 
 /* news cards */
 .news-card {
-    background: rgba(15,22,38,0.8); border: 1px solid var(--line);
+    background: var(--panel); border: 1px solid var(--line);
     border-left: 3px solid var(--tone, var(--muted));
     border-radius: 12px; padding: 13px 16px; margin-bottom: 10px;
+    box-shadow: var(--shadow);
 }
-.news-card a { color: #E6EDF3; font-weight: 600; text-decoration: none; font-size: 0.95rem; }
+.news-card a { color: var(--text); font-weight: 600; text-decoration: none; font-size: 0.95rem; }
 .news-card a:hover { color: var(--green); }
 .news-card .meta { color: var(--muted); font-size: 0.78rem; margin-top: 4px; }
 
 /* bucket cards */
 .bucket {
-    background: rgba(15,22,38,0.8); border: 1px solid var(--line);
+    background: var(--panel); border: 1px solid var(--line);
     border-radius: 16px; padding: 16px 18px; margin-bottom: 14px;
+    box-shadow: var(--shadow);
 }
 .bucket .head { display: flex; justify-content: space-between; align-items: baseline; }
-.bucket .name { font-weight: 800; font-size: 1.02rem; }
+.bucket .name { font-weight: 800; font-size: 1.02rem; color: var(--text); }
 .bucket .tally { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; }
 .bucket .members { color: var(--muted); font-size: 0.84rem; margin-top: 8px; line-height: 1.7; }
 .bucket .members b.up { color: var(--green); font-weight: 700; }
 .bucket .members b.dn { color: var(--red); font-weight: 700; }
 
-h2, h3 { letter-spacing: -0.02em; }
+h1, h2, h3, h4, h5 { letter-spacing: -0.02em; color: var(--text); }
 div[data-testid="stMetric"] {
-    background: rgba(15,22,38,0.85); border: 1px solid var(--line);
-    border-radius: 16px; padding: 14px 18px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 16px; padding: 14px 18px; box-shadow: var(--shadow);
 }
-</style>
-""", unsafe_allow_html=True)
+</style>""", unsafe_allow_html=True)
 
 TIER_PILL = {"WOULD": "<span class='pill pill-would'>Would</span>",
              "COULD": "<span class='pill pill-could'>Could</span>",
@@ -223,6 +294,8 @@ def signal_bars(pairs: list[tuple[str, float]]) -> str:
 
 # ---------------------------------------------------------------- sidebar
 st.sidebar.markdown("## 📈 Weekly Stock Outlook")
+st.sidebar.toggle("☀️ Light mode", key="light_mode",
+                  help="Switch between night and day themes")
 st.sidebar.caption(
     "Signals from **price action**, **credible news** (Reuters, Bloomberg, AP, "
     "CNBC, WSJ, Barron's, MarketWatch…), **ascending volume**, and "
@@ -271,10 +344,12 @@ high_conv = [r for r in filtered if r["prediction"]["tier"] == "WOULD"]
 covered = [r for r in filtered if r["news"]["count"] > 0]
 avg_tone = (sum(r["news"]["score"] for r in covered) / len(covered)) if covered else 0.0
 
+today = datetime.now().strftime("%A, %B %d, %Y")
 st.markdown(
     "<div class='hero'><h1>Weekly <span class='grad'>Stock Outlook</span></h1>"
-    "<p>Directional leans for the coming 1–3 weeks · price action + credible news "
-    f"+ volume + sector rotation · showing {len(filtered)} of {len(results)} stocks</p></div>",
+    f"<p>{today} · directional leans for the coming 1–3 weeks · price action + "
+    "credible news + volume + sector rotation · showing "
+    f"{len(filtered)} of {len(results)} stocks</p></div>",
     unsafe_allow_html=True)
 st.write("")
 
@@ -403,7 +478,7 @@ with tab_sectors:
     rows = [(name, d["etf"], d["rel_1m"], d["ret_1m"])
             for name, d in sector_scores.items() if d["rel_1m"] is not None]
     rows.sort(key=lambda x: x[2])
-    st.plotly_chart(charts.sector_figure(rows), width="stretch",
+    st.plotly_chart(charts.sector_figure(rows, CHART_PAL), width="stretch",
                     config={"displayModeBar": False})
     st.caption("Stocks in leading sectors get a tailwind in the composite score; "
                "lagging sectors a headwind.")
@@ -519,7 +594,7 @@ with tab_detail:
             st.markdown("\n".join(f"- {reason}" for reason in p["reasons"]))
 
         if r["history"] is not None:
-            st.plotly_chart(charts.price_figure(r["history"], r["ticker"]),
+            st.plotly_chart(charts.price_figure(r["history"], r["ticker"], CHART_PAL),
                             width="stretch", config=CHART_CONFIG)
             st.caption("🖱️ Scroll to zoom · drag to pan · buttons for 1M–All ranges · "
                        "drag the strip below the volume panel to scrub · "
@@ -551,4 +626,12 @@ with tab_detail:
                     unsafe_allow_html=True)
         else:
             st.info("No recent coverage from trusted publishers — outlook relies on "
-                    "price action and sector strength only.")
+                    "price action, volume, and sector strength only.")
+
+# ---------------------------------------------------------------- theme bounce
+# Native widget theming is read when a run *starts*, so a theme change lands
+# one run late. Bounce once at the END of the script (after every widget has
+# been instantiated, so their state survives the rerun).
+if st.session_state.get("_applied_theme", False) != IS_LIGHT:
+    st.session_state["_applied_theme"] = IS_LIGHT
+    st.rerun()
