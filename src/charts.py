@@ -147,6 +147,48 @@ def price_figure(hist: pd.DataFrame, ticker: str, p: dict = DARK_CHART) -> go.Fi
     return fig
 
 
+def intraday_figure(df: pd.DataFrame, ticker: str, p: dict = DARK_CHART) -> go.Figure:
+    """Intraday candles + VWAP + volume, incl. pre/post-market sessions."""
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
+                        row_heights=[0.78, 0.22], vertical_spacing=0.04)
+
+    fig.add_trace(go.Candlestick(
+        x=df.index, open=df["Open"], high=df["High"],
+        low=df["Low"], close=df["Close"], name=ticker,
+        increasing=dict(line=dict(color=p["up"], width=1),
+                        fillcolor=p["up_fill"]),
+        decreasing=dict(line=dict(color=p["down"], width=1),
+                        fillcolor=p["down_fill"]),
+        whiskerwidth=0.5,
+    ), row=1, col=1)
+
+    if "Volume" in df and df["Volume"].sum() > 0:
+        typical = (df["High"] + df["Low"] + df["Close"]) / 3
+        vwap = (typical * df["Volume"]).cumsum() / df["Volume"].cumsum()
+        fig.add_trace(go.Scatter(
+            x=df.index, y=vwap, name="VWAP",
+            line=dict(color=p["sma_fast"], width=1.4, dash="dot"),
+            hovertemplate="VWAP $%{y:,.2f}<extra></extra>",
+        ), row=1, col=1)
+        vol_colors = [p["up_vol"] if c >= o else p["down_vol"]
+                      for o, c in zip(df["Open"], df["Close"])]
+        fig.add_trace(go.Bar(
+            x=df.index, y=df["Volume"], name="Volume",
+            marker=dict(color=vol_colors, line_width=0),
+            hovertemplate="Vol %{y:,.0f}<extra></extra>",
+        ), row=2, col=1)
+
+    _base_layout(fig, height=520, p=p)
+    # hide overnight (8pm-4am ET) and weekend gaps so sessions sit flush
+    fig.update_xaxes(rangebreaks=[
+        dict(bounds=["sat", "mon"]),
+        dict(bounds=[20, 4], pattern="hour"),
+    ])
+    fig.update_yaxes(row=1, col=1, tickprefix="$", side="right")
+    fig.update_yaxes(row=2, col=1, showticklabels=False, showspikes=False)
+    return fig
+
+
 def sector_figure(rows: list[tuple], p: dict = DARK_CHART) -> go.Figure:
     """Horizontal sector relative-strength bars. rows: (name, etf, rel, ret)."""
     fig = go.Figure(go.Bar(

@@ -9,7 +9,7 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from src import charts, finviz_data, pipeline, sectors
+from src import charts, finviz_data, live, pipeline, sectors
 from src import news as news_mod
 from src.charts import CHART_CONFIG
 from src.classify import CAP_ORDER
@@ -211,6 +211,20 @@ div[data-testid="stExpander"]:hover { border-color: var(--green-border); }
 .bucket .members b.up { color: var(--green); font-weight: 700; }
 .bucket .members b.dn { color: var(--red); font-weight: 700; }
 
+/* live futures strip */
+.tickrow { display: flex; gap: 10px; flex-wrap: wrap; }
+.tick {
+    flex: 1; min-width: 118px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 12px;
+    padding: 8px 12px; box-shadow: var(--shadow);
+}
+.tick .tlab { color: var(--muted); font-size: 0.68rem; font-weight: 700;
+              letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap; }
+.tick .tval { font-family: 'JetBrains Mono', monospace; font-weight: 700;
+              font-size: 0.95rem; color: var(--text); white-space: nowrap; }
+.tick .tchg { font-family: 'JetBrains Mono', monospace; font-weight: 700;
+              font-size: 0.78rem; white-space: nowrap; }
+
 h1, h2, h3, h4, h5 { letter-spacing: -0.02em; color: var(--text); }
 div[data-testid="stMetric"] {
     background: var(--panel); border: 1px solid var(--line);
@@ -259,6 +273,21 @@ def load_market_news():
 @st.cache_data(ttl=900, show_spinner=False)
 def load_stock_news(ticker: str):
     return news_mod.analyze(finviz_data.stock_news(ticker))
+
+
+@st.cache_data(ttl=55, show_spinner=False)
+def load_futures_quotes():
+    return live.futures_quotes()
+
+
+@st.cache_data(ttl=25, show_spinner=False)
+def load_live_quote(ticker: str):
+    return live.live_quote(ticker)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def load_intraday(ticker: str, key: str):
+    return live.intraday(ticker, key)
 
 
 def fmt_cap(v):
@@ -362,6 +391,35 @@ kpi(k2, "Bearish leans", f"▼ {len(bears)}",
     "glow-red")
 kpi(k3, "Conviction", f"{len(high_conv)}", "stocks with all signals aligned")
 kpi(k4, "News tone", f"{avg_tone:+.2f}", f"{len(covered)} stocks with trusted coverage")
+st.write("")
+
+
+@st.fragment(run_every=60)
+def live_futures_strip():
+    try:
+        quotes = load_futures_quotes()
+    except Exception:
+        quotes = []
+    if not quotes:
+        st.caption("live futures quotes unavailable right now")
+        return
+    chips = []
+    for q in quotes:
+        color = "var(--green)" if q["chg_pct"] >= 0 else "var(--red)"
+        arrow = "▲" if q["chg_pct"] >= 0 else "▼"
+        price = f"{q['last']:,.2f}"
+        chips.append(
+            f"<div class='tick'><div class='tlab'>{q['label']}</div>"
+            f"<div class='tval'>{price}</div>"
+            f"<div class='tchg' style='color:{color}'>{arrow} "
+            f"{q['chg_pct']:+.2f}%</div></div>")
+    st.markdown(f"<div class='tickrow'>{''.join(chips)}</div>",
+                unsafe_allow_html=True)
+    st.caption(f"⚡ live — futures trade nearly 24h · auto-updates every 60s · "
+               f"last update {datetime.now().strftime('%H:%M:%S')}")
+
+
+live_futures_strip()
 st.write("")
 
 tab_outlook, tab_scanner, tab_sectors, tab_news, tab_buckets, tab_detail = st.tabs(
@@ -568,8 +626,20 @@ with tab_detail:
         st.markdown(f"*{r['headline']}*")
 
         c1, c2, c3, c4, c5 = st.columns(5)
-        wk = "—" if tech["ret_1w"] is None else f"{tech['ret_1w'] * 100:+.1f}% this week"
-        kpi(c1, "Price", f"${tech['last']:,.2f}", wk)
+
+        @st.fragment(run_every=30)
+        def live_price_kpi(ticker=r["ticker"], fallback=tech["last"]):
+            q = load_live_quote(ticker)
+            if q is None:
+                kpi(st, "Price", f"${fallback:,.2f}", "daily close")
+                return
+            chg = "" if q["chg_pct"] is None else f"{q['chg_pct']:+.2f}% today · "
+            asof = q["asof"].strftime("%H:%M") if q.get("asof") is not None else ""
+            kpi(st, "Price · live", f"${q['last']:,.2f}",
+                f"{chg}⚡ as of {asof} · incl. pre/post")
+
+        with c1:
+            live_price_kpi()
         kpi(c2, "Mkt cap", fmt_cap(prof["market_cap"]), f"{r['cap_class']} cap")
         kpi(c3, "Score", f"{p['composite']:+.2f}", TIER_HELP[p["tier"]])
         kpi(c4, "RSI (14)", "—" if tech["rsi"] is None else f"{tech['rsi']:.0f}",
@@ -593,7 +663,32 @@ with tab_detail:
             st.markdown("##### Why")
             st.markdown("\n".join(f"- {reason}" for reason in p["reasons"]))
 
-        if r["history"] is not None:
+        tf = st.radio("Timeframe", ["⚡ 1D live", "⚡ 5D live", "1Y daily"],
+                      horizontal=True, label_visibility="collapsed")
+
+        if tf.startswith("⚡"):
+            key = "1D" if "1D" in tf else "5D"
+
+            @st.fragment(run_every=60)
+            def live_chart(ticker=r["ticker"], key=key):
+                idf = load_intraday(ticker, key)
+                if idf is None or idf.empty:
+                    st.info("No intraday data available for this ticker right now — "
+                            "showing the daily chart instead.")
+                    if r["history"] is not None:
+                        st.plotly_chart(
+                            charts.price_figure(r["history"], ticker, CHART_PAL),
+                            width="stretch", config=CHART_CONFIG)
+                    return
+                st.plotly_chart(charts.intraday_figure(idf, ticker, CHART_PAL),
+                                width="stretch", config=CHART_CONFIG)
+                st.caption(f"⚡ {key} · {'1-min' if key == '1D' else '5-min'} candles "
+                           "incl. pre/post-market · dotted line = VWAP · "
+                           "auto-updates every 60s · "
+                           f"last update {datetime.now().strftime('%H:%M:%S')}")
+
+            live_chart()
+        elif r["history"] is not None:
             st.plotly_chart(charts.price_figure(r["history"], r["ticker"], CHART_PAL),
                             width="stretch", config=CHART_CONFIG)
             st.caption("🖱️ Scroll to zoom · drag to pan · buttons for 1M–All ranges · "
