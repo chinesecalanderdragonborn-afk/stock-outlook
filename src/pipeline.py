@@ -11,7 +11,7 @@ from __future__ import annotations
 from . import classify, finviz_data, news, predictor, technicals
 from .data import fetch_history, fetch_profile, fetch_raw_news
 
-ENRICH_TOP = 20  # strongest-signal stocks that get Finviz-deepened news
+ENRICH_TOP = 12  # strongest-signal stocks that get Finviz-deepened news
 
 
 def analyze_universe(tickers: list[str], sector_scores: dict[str, dict],

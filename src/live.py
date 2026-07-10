@@ -22,9 +22,11 @@ INTRADAY_SPECS = {"1D": ("1d", "1m"), "5D": ("5d", "5m")}
 def futures_quotes() -> list[dict]:
     """Latest price + day change for the futures/index strip."""
     symbols = [s for s, _ in FUTURES]
+    # threads=False: repeated threaded downloads in long-running fragments
+    # can accumulate and destabilize small cloud containers
     df = yf.download(" ".join(symbols), period="5d", interval="1d",
                      group_by="ticker", auto_adjust=False,
-                     progress=False, threads=True)
+                     progress=False, threads=False)
     out = []
     for sym, label in FUTURES:
         try:

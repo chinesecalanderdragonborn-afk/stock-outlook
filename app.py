@@ -249,7 +249,7 @@ def load_sector_scores():
     return sectors.sector_strength()
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False, max_entries=2)
 def load_results(tickers: tuple[str, ...]):
     return pipeline.analyze_universe(list(tickers), load_sector_scores())
 
@@ -280,12 +280,12 @@ def load_futures_quotes():
     return live.futures_quotes()
 
 
-@st.cache_data(ttl=25, show_spinner=False)
+@st.cache_data(ttl=25, show_spinner=False, max_entries=16)
 def load_live_quote(ticker: str):
     return live.live_quote(ticker)
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False, max_entries=16)
 def load_intraday(ticker: str, key: str):
     return live.intraday(ticker, key)
 
@@ -394,7 +394,7 @@ kpi(k4, "News tone", f"{avg_tone:+.2f}", f"{len(covered)} stocks with trusted co
 st.write("")
 
 
-@st.fragment(run_every=60)
+@st.fragment(run_every=90)
 def live_futures_strip():
     try:
         quotes = load_futures_quotes()
@@ -415,7 +415,7 @@ def live_futures_strip():
             f"{q['chg_pct']:+.2f}%</div></div>")
     st.markdown(f"<div class='tickrow'>{''.join(chips)}</div>",
                 unsafe_allow_html=True)
-    st.caption(f"⚡ live — futures trade nearly 24h · auto-updates every 60s · "
+    st.caption(f"⚡ live — futures trade nearly 24h · auto-updates every 90s · "
                f"last update {datetime.now().strftime('%H:%M:%S')}")
 
 
@@ -627,7 +627,7 @@ with tab_detail:
 
         c1, c2, c3, c4, c5 = st.columns(5)
 
-        @st.fragment(run_every=30)
+        @st.fragment(run_every=45)
         def live_price_kpi(ticker=r["ticker"], fallback=tech["last"]):
             q = load_live_quote(ticker)
             if q is None:
@@ -669,7 +669,7 @@ with tab_detail:
         if tf.startswith("⚡"):
             key = "1D" if "1D" in tf else "5D"
 
-            @st.fragment(run_every=60)
+            @st.fragment(run_every=120)
             def live_chart(ticker=r["ticker"], key=key):
                 idf = load_intraday(ticker, key)
                 if idf is None or idf.empty:
@@ -684,7 +684,7 @@ with tab_detail:
                                 width="stretch", config=CHART_CONFIG)
                 st.caption(f"⚡ {key} · {'1-min' if key == '1D' else '5-min'} candles "
                            "incl. pre/post-market · dotted line = VWAP · "
-                           "auto-updates every 60s · "
+                           "auto-updates every 2 min · "
                            f"last update {datetime.now().strftime('%H:%M:%S')}")
 
             live_chart()
