@@ -1,4 +1,4 @@
-# deps for Weekly Stock Outlook (touch this file to force a full cloud restart) · r2
+# deps for Weekly Stock Outlook (touch this file to force a full cloud restart) · r3
 yfinance>=0.2.50
 streamlit>=1.40
 plotly>=5.24
